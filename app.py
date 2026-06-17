@@ -5,7 +5,7 @@ from datetime import datetime
 
 # ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="ระบบบันทึกค่าใช้จ่ายรายวีค ถาวรสูงสุด", layout="wide")
-st.title("💰 ระบบบันทึกและคำนวณค่าใช้จ่ายรายปักษ์ (พร้อมระบบสำรองข้อมูล)")
+st.title("💰 ระบบบันทึกและคำนวณค่าใช้จ่าย (พร้อมระบบสำรองข้อมูล)")
 st.write("บันทึกค่าใช้จ่ายรายวัน และจัดหมวดหมู่งวดเงินเดือนไม่ให้หายด้วยระบบ Backup")
 
 # ชื่อไฟล์ฐานข้อมูล CSV
@@ -34,16 +34,13 @@ df_all = load_data()
 # ==================== 🛠️ เพิ่มระบบดึงข้อมูลสำรอง (Restore Data) ด้านข้าง ====================
 st.sidebar.header("💾 ระบบสำรองข้อมูล")
 
-# ช่องให้อัปโหลดไฟล์เก่าคืนกรณีคลาวด์หลับลืมข้อมูล
-uploaded_backup = st.sidebar.file_saver = st.sidebar.file_uploader("กู้คืนข้อมูล (อัปโหลดไฟล์ CSV ที่เคยเซฟไว้):", type=["csv"])
+uploaded_backup = st.sidebar.file_uploader("กู้คืนข้อมูล (อัปโหลดไฟล์ CSV ที่เคยเซฟไว้):", type=["csv"])
 if uploaded_backup is not None:
     try:
         df_backup = pd.read_csv(uploaded_backup)
-        # ตรวจสอบคอลัมน์ว่าถูกต้องไหมก่อนเซฟทับ
         if "MonthYear" in df_backup.columns and "Expense" in df_backup.columns:
             save_data(df_backup)
             st.sidebar.success("🔄 กู้คืนประวัติข้อมูลสำเร็จแล้ว!")
-            # โหลดข้อมูลใหม่หลังจากกู้คืน
             df_all = load_data()
         else:
             st.sidebar.error("ไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์ที่ดาวน์โหลดจากระบบนี้เท่านั้นค่ะ")
@@ -73,8 +70,37 @@ with col1:
         
     month_year_str = f"{select_month}-{select_year}"
     selected_period = st.radio("เงินเดือนงวดรอบวันที่:", ["งวดวันที่ 15", "งวดวันที่ 30"], horizontal=True)
-    income = st.number_input("จำนวนเงินเดือนที่ได้รับในงวดนี้ (บาท):", min_value=0.0, value=15000.0, step=500.0)
     
+    # ดึงค่าเงินเดือนล่าสุดของงวดนี้ที่มีในระบบมาตั้งต้น (ถ้ามี)
+    existing_income = 0.0
+    if not df_all.empty:
+        match_income = df_all[
+            (df_all["User"] == current_user) & 
+            (df_all["MonthYear"] == month_year_str) & 
+            (df_all["Period"] == selected_period)
+        ]
+        if not match_income.empty:
+            existing_income = float(match_income["Income"].iloc[-1])
+            
+    # ช่องกรอกเงินงวด (จะดึงค่าเก่ามาโชว์ให้อัตโนมัติ ไม่ต้องกรอกใหม่ทุกวัน)
+    income = st.number_input("จำนวนเงินเดือนที่ได้รับในงวดนี้ (บาท):", min_value=0.0, value=existing_income if existing_income > 0 else 15000.0, step=500.0)
+    
+    # 🆕 ปุ่มสำหรับอัปเดตยอดเงินเดือนงวดนี้โดยเฉพาะ (กดแค่วีคละครั้งตอนเงินออก)
+    if st.button("💰 อัปเดต/บันทึกยอดเงินงวดนี้ (กดเฉพาะตอนเงินออก)", use_container_width=True):
+        new_income_row = pd.DataFrame([{
+            "User": current_user,
+            "Date": datetime.now().strftime("%Y-%m-%d"),
+            "MonthYear": month_year_str,
+            "Period": selected_period,
+            "Income": income,
+            "Item": "📝 เริ่มต้นงวดเงินเดือนใหม่",
+            "Expense": 0.0
+        }])
+        df_all = pd.concat([df_all, new_income_row], ignore_index=True)
+        save_data(df_all)
+        st.success(f"บันทึกยอดเงินงวด {selected_period} จำนวน {income:,.2f} บาท สำเร็จ!")
+        st.rerun()
+        
     st.markdown("---")
     st.write("**➕ เพิ่มรายการค่าใช้จ่ายของวันนี้**")
     
@@ -84,7 +110,7 @@ with col1:
     item_name = st.text_input("ชื่อรายการค่าใช้จ่าย:", placeholder="เช่น ค่าอาหาร, ค่าน้ำมัน, ช้อปปิ้ง")
     item_amount = st.number_input("จำนวนเงิน (บาท):", min_value=0.0, value=0.0, step=50.0)
     
-    if st.button("บันทึกรายการค่าใช้จ่าย"):
+    if st.button("บันทึกรายการค่าใช้จ่าย", type="primary", use_container_width=True):
         if item_name != "" and item_amount > 0:
             new_row = pd.DataFrame([{
                 "User": current_user,
@@ -115,7 +141,7 @@ with col2:
     with v2:
         view_period = st.selectbox("เลือกงวดรอบวันที่ที่จะดู:", ["งวดวันที่ 15", "งวดวันที่ 30"], key="view_period")
     
-    # กรองข้อมูลตาม เงื่อนไข
+    # กรองข้อมูลตามเงื่อนไข
     if not df_all.empty:
         df_filtered = df_all[
             (df_all["User"] == current_user) & 
@@ -125,8 +151,9 @@ with col2:
     else:
         df_filtered = pd.DataFrame()
         
-    if df_filtered is not None and not df_filtered.empty:
+    if not df_filtered.empty:
         total_income = df_filtered["Income"].iloc[-1]
+        # คำนวณค่าใช้จ่ายโดยไม่นับบรรทัดเริ่มต้นเงินเดือน
         total_expense = df_filtered["Expense"].sum()
         balance = total_income - total_expense
         
@@ -142,13 +169,18 @@ with col2:
             
         st.markdown("---")
         st.write(f"**📋 รายละเอียดการจ่ายเงินย้อนหลังของ {view_period} เดือน {view_month_year}**")
-        st.dataframe(df_filtered[["Date", "Item", "Expense"]].sort_values(by="Date", ascending=False), use_container_width=True)
+        
+        # แสดงเฉพาะรายการที่มีค่าใช้จ่ายจริง (ซ่อนบรรทัดตั้งต้นเงินเดือนเพื่อความสะอาดตา)
+        df_display = df_filtered[df_filtered["Expense"] > 0]
+        if not df_display.empty:
+            st.dataframe(df_display[["Date", "Item", "Expense"]].sort_values(by="Date", ascending=False), use_container_width=True)
+        else:
+            st.info("งวดนี้ยังไม่มีการบันทึกรายการค่าใช้จ่ายรายวันค่ะ")
         
         # ==================== 📥 เพิ่มปุ่มดาวน์โหลดข้อมูลทั้งหมดแปลงเป็น Excel/CSV ====================
         st.markdown("---")
         st.write("**📥 ดาวน์โหลดสำรองข้อมูลทั้งหมดในระบบ**")
         
-        # แปลงข้อมูลทั้งหมดเป็น CSV รูปแบบ UTF-8 สำหรับเปิดใน Excel ภาษาไทยไม่เพี้ยน
         csv_data = df_all.to_csv(index=False).encode('utf-8-sig')
         
         st.download_button(
