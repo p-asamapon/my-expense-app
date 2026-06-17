@@ -31,7 +31,7 @@ def save_data(df):
 # โหลดข้อมูลเก่าขึ้นมาแสดงผล
 df_all = load_data()
 
-# ==================== 🛠️ เพิ่มระบบดึงข้อมูลสำรอง (Restore Data) ด้านข้าง ====================
+# ==================== 🛠️ ระบบดึงข้อมูลสำรอง ด้านข้าง ====================
 st.sidebar.header("💾 ระบบสำรองข้อมูล")
 
 uploaded_backup = st.sidebar.file_uploader("กู้คืนข้อมูล (อัปโหลดไฟล์ CSV ที่เคยเซฟไว้):", type=["csv"])
@@ -71,22 +71,41 @@ with col1:
     month_year_str = f"{select_month}-{select_year}"
     selected_period = st.radio("เงินเดือนงวดรอบวันที่:", ["งวดวันที่ 15", "งวดวันที่ 30"], horizontal=True)
     
-    # ดึงค่าเงินเดือนล่าสุดของงวดนี้ที่มีในระบบมาตั้งต้น (ถ้ามี)
+    # 🔍 หายอดเงินเดือนล่าสุดที่เคยบันทึกไว้ในระบบของงวดนี้จริงๆ
     existing_income = 0.0
     if not df_all.empty:
         match_income = df_all[
             (df_all["User"] == current_user) & 
             (df_all["MonthYear"] == month_year_str) & 
-            (df_all["Period"] == selected_period)
+            (df_all["Period"] == selected_period) &
+            (df_all["Item"] == "📝 เริ่มต้นงวดเงินเดือนใหม่")
         ]
         if not match_income.empty:
             existing_income = float(match_income["Income"].iloc[-1])
+        else:
+            # ลองหาจากแถวธรรมดาเผื่อกรณีไม่มีแถวตั้งต้น
+            match_any = df_all[
+                (df_all["User"] == current_user) & 
+                (df_all["MonthYear"] == month_year_str) & 
+                (df_all["Period"] == selected_period)
+            ]
+            if not match_any.empty:
+                existing_income = float(match_any["Income"].iloc[-1])
             
-    # ช่องกรอกเงินงวด (จะดึงค่าเก่ามาโชว์ให้อัตโนมัติ ไม่ต้องกรอกใหม่ทุกวัน)
+    # ช่องกรอกเงินงวด (จะดึงยอดที่บันทึกไว้มาแสดงให้อัตโนมัติ)
     income = st.number_input("จำนวนเงินเดือนที่ได้รับในงวดนี้ (บาท):", min_value=0.0, value=existing_income if existing_income > 0 else 15000.0, step=500.0)
     
-    # 🆕 ปุ่มสำหรับอัปเดตยอดเงินเดือนงวดนี้โดยเฉพาะ (กดแค่วีคละครั้งตอนเงินออก)
+    # ปุ่มอัปเดตยอดเงินเดือนประจำงวด (กดแค่วีคละครั้งตอนเงินออก)
     if st.button("💰 อัปเดต/บันทึกยอดเงินงวดนี้ (กดเฉพาะตอนเงินออก)", use_container_width=True):
+        # ลบยอดตั้งต้นเก่าของงวดนี้ออกก่อน (ถ้ามี) เพื่อไม่ให้แถวซ้ำซ้อน
+        if not df_all.empty:
+            df_all = df_all[~(
+                (df_all["User"] == current_user) & 
+                (df_all["MonthYear"] == month_year_str) & 
+                (df_all["Period"] == selected_period) &
+                (df_all["Item"] == "📝 เริ่มต้นงวดเงินเดือนใหม่")
+            )]
+            
         new_income_row = pd.DataFrame([{
             "User": current_user,
             "Date": datetime.now().strftime("%Y-%m-%d"),
@@ -112,12 +131,15 @@ with col1:
     
     if st.button("บันทึกรายการค่าใช้จ่าย", type="primary", use_container_width=True):
         if item_name != "" and item_amount > 0:
+            # ใช้ยอดเงินงวดปัจจุบันที่บันทึกไว้ในระบบบันทึกลงไปในแถวค่าใช้จ่ายด้วย เพื่อป้องกันยอดเพี้ยน
+            current_saved_income = existing_income if existing_income > 0 else income
+            
             new_row = pd.DataFrame([{
                 "User": current_user,
                 "Date": today_str,
                 "MonthYear": month_year_str,
                 "Period": selected_period,
-                "Income": income,
+                "Income": current_saved_income,
                 "Item": item_name,
                 "Expense": item_amount
             }])
@@ -152,8 +174,14 @@ with col2:
         df_filtered = pd.DataFrame()
         
     if not df_filtered.empty:
-        total_income = df_filtered["Income"].iloc[-1]
-        # คำนวณค่าใช้จ่ายโดยไม่นับบรรทัดเริ่มต้นเงินเดือน
+        # ⭐ ปรับลอจิกดึงเงินเดือน: หายอดเงินเดือนจากแถวตั้งต้นของงวดนี้ เพื่อให้ยอดเงินนิ่งและหักลบได้ต่อเนื่อง
+        inc_row = df_filtered[df_filtered["Item"] == "📝 เริ่มต้นงวดเงินเดือนใหม่"]
+        if not inc_row.empty:
+            total_income = float(inc_row["Income"].iloc[-1])
+        else:
+            total_income = float(df_filtered["Income"].iloc[0])
+            
+        # คำนวณค่าใช้จ่ายทั้งหมดในงวดนี้
         total_expense = df_filtered["Expense"].sum()
         balance = total_income - total_expense
         
@@ -170,14 +198,14 @@ with col2:
         st.markdown("---")
         st.write(f"**📋 รายละเอียดการจ่ายเงินย้อนหลังของ {view_period} เดือน {view_month_year}**")
         
-        # แสดงเฉพาะรายการที่มีค่าใช้จ่ายจริง (ซ่อนบรรทัดตั้งต้นเงินเดือนเพื่อความสะอาดตา)
+        # แสดงเฉพาะรายการที่มีค่าใช้จ่ายจริง (ซ่อนแถวเริ่มต้นเงินเดือนเพื่อความสะอาดตา)
         df_display = df_filtered[df_filtered["Expense"] > 0]
         if not df_display.empty:
             st.dataframe(df_display[["Date", "Item", "Expense"]].sort_values(by="Date", ascending=False), use_container_width=True)
         else:
             st.info("งวดนี้ยังไม่มีการบันทึกรายการค่าใช้จ่ายรายวันค่ะ")
         
-        # ==================== 📥 เพิ่มปุ่มดาวน์โหลดข้อมูลทั้งหมดแปลงเป็น Excel/CSV ====================
+        # ==================== 📥 ปุ่มดาวน์โหลดสำรองข้อมูลทั้งหมด ====================
         st.markdown("---")
         st.write("**📥 ดาวน์โหลดสำรองข้อมูลทั้งหมดในระบบ**")
         
