@@ -5,8 +5,8 @@ from datetime import datetime
 
 # ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="ระบบบันทึกค่าใช้จ่ายรายวีค ถาวรสูงสุด", layout="wide")
-st.title("💰 ระบบบันทึกและคำนวณค่าใช้จ่าย (พร้อมระบบสำรองข้อมูล)")
-st.write("บันทึกค่าใช้จ่ายรายวัน และจัดหมวดหมู่งวดเงินเดือนไม่ให้หายด้วยระบบ Backup")
+st.title("💰 ระบบบันทึกและคำนวณค่าใช้จ่าย")
+st.write("บันทึกค่าใช้จ่ายรายวัน และจัดหมวดหมู่งวดเงินเดือนอย่างถูกต้องในชีวิตประจำวัน")
 
 # ชื่อไฟล์ฐานข้อมูล CSV
 CSV_FILE = "expense_database.csv"
@@ -28,28 +28,10 @@ def load_data():
 def save_data(df):
     df.to_csv(CSV_FILE, index=False)
 
-# โหลดข้อมูลเก่าขึ้นมาแสดงผล
+# โหลดข้อมูลเก่าขึ้นมาแสดงผลโดยอัตโนมัติ
 df_all = load_data()
 
-# ==================== 🛠️ ระบบดึงข้อมูลสำรอง ด้านข้าง ====================
-st.sidebar.header("💾 ระบบสำรองข้อมูล")
-
-uploaded_backup = st.sidebar.file_uploader("กู้คืนข้อมูล (อัปโหลดไฟล์ CSV ที่เคยเซฟไว้):", type=["csv"])
-if uploaded_backup is not None:
-    try:
-        df_backup = pd.read_csv(uploaded_backup)
-        if "MonthYear" in df_backup.columns and "Expense" in df_backup.columns:
-            save_data(df_backup)
-            st.sidebar.success("🔄 กู้คืนประวัติข้อมูลสำเร็จแล้ว!")
-            df_all = load_data()
-        else:
-            st.sidebar.error("ไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์ที่ดาวน์โหลดจากระบบนี้เท่านั้นค่ะ")
-    except Exception as e:
-        st.sidebar.error("เกิดข้อผิดพลาดในการอ่านไฟล์")
-
-st.sidebar.markdown("---")
-
-# ส่วนเลือกผู้ใช้งานด้านข้าง
+# --- ส่วนเลือกผู้ใช้งานด้านข้าง ---
 st.sidebar.header("👤 บัญชีผู้ใช้งาน")
 current_user = st.sidebar.radio("เลือกรายชื่อผู้ใช้งาน:", ["พลอย", "คิม"])
 
@@ -71,7 +53,7 @@ with col1:
     month_year_str = f"{select_month}-{select_year}"
     selected_period = st.radio("เงินเดือนงวดรอบวันที่:", ["งวดวันที่ 15", "งวดวันที่ 30"], horizontal=True)
     
-    # 🔍 หายอดเงินเดือนล่าสุดที่เคยบันทึกไว้ในระบบของงวดนี้จริงๆ
+    # 🔍 หายอดเงินเดือนล่าสุดที่เคยบันทึกไว้ในระบบของงวดนี้จริงๆ มาตั้งต้นให้
     existing_income = 0.0
     if not df_all.empty:
         match_income = df_all[
@@ -83,7 +65,6 @@ with col1:
         if not match_income.empty:
             existing_income = float(match_income["Income"].iloc[-1])
         else:
-            # ลองหาจากแถวธรรมดาเผื่อกรณีไม่มีแถวตั้งต้น
             match_any = df_all[
                 (df_all["User"] == current_user) & 
                 (df_all["MonthYear"] == month_year_str) & 
@@ -92,12 +73,11 @@ with col1:
             if not match_any.empty:
                 existing_income = float(match_any["Income"].iloc[-1])
             
-    # ช่องกรอกเงินงวด (จะดึงยอดที่บันทึกไว้มาแสดงให้อัตโนมัติ)
+    # ช่องกรอกเงินงวด
     income = st.number_input("จำนวนเงินเดือนที่ได้รับในงวดนี้ (บาท):", min_value=0.0, value=existing_income if existing_income > 0 else 15000.0, step=500.0)
     
-    # ปุ่มอัปเดตยอดเงินเดือนประจำงวด (กดแค่วีคละครั้งตอนเงินออก)
+    # ปุ่มอัปเดตยอดเงินเดือนประจำงวด
     if st.button("💰 อัปเดต/บันทึกยอดเงินงวดนี้ (กดเฉพาะตอนเงินออก)", use_container_width=True):
-        # ลบยอดตั้งต้นเก่าของงวดนี้ออกก่อน (ถ้ามี) เพื่อไม่ให้แถวซ้ำซ้อน
         if not df_all.empty:
             df_all = df_all[~(
                 (df_all["User"] == current_user) & 
@@ -131,7 +111,6 @@ with col1:
     
     if st.button("บันทึกรายการค่าใช้จ่าย", type="primary", use_container_width=True):
         if item_name != "" and item_amount > 0:
-            # ใช้ยอดเงินงวดปัจจุบันที่บันทึกไว้ในระบบบันทึกลงไปในแถวค่าใช้จ่ายด้วย เพื่อป้องกันยอดเพี้ยน
             current_saved_income = existing_income if existing_income > 0 else income
             
             new_row = pd.DataFrame([{
@@ -174,14 +153,14 @@ with col2:
         df_filtered = pd.DataFrame()
         
     if not df_filtered.empty:
-        # ⭐ ปรับลอจิกดึงเงินเดือน: หายอดเงินเดือนจากแถวตั้งต้นของงวดนี้ เพื่อให้ยอดเงินนิ่งและหักลบได้ต่อเนื่อง
+        # ดึงยอดเงินเดือนจากแถวตั้งต้นประจำงวด
         inc_row = df_filtered[df_filtered["Item"] == "📝 เริ่มต้นงวดเงินเดือนใหม่"]
         if not inc_row.empty:
             total_income = float(inc_row["Income"].iloc[-1])
         else:
             total_income = float(df_filtered["Income"].iloc[0])
             
-        # คำนวณค่าใช้จ่ายทั้งหมดในงวดนี้
+        # คำนวณค่าใช้จ่ายรวม
         total_expense = df_filtered["Expense"].sum()
         balance = total_income - total_expense
         
@@ -192,16 +171,36 @@ with col2:
         if balance >= 0:
             m3.metric(label="คงเหลือเงินสุทธิ", value=f"{balance:,.2f} บาท")
         else:
-            m3.metric(label="เงินคงเหลือ (เกินงบแล้ว!)", value=f"{balance:,.2f} บาท", delta=f"{balance:,.2f}", delta_color="normal")
+            m3.metric(label="เงินคงเหลือ (เกินงบแล้ว!)", value=f"{balance:,.2f} บาท", delta=f"{balance:xA00f}", delta_color="normal")
             st.error("⚠️ คำเตือน: ยอดรวมค่าใช้จ่ายเกินวงเงินเดือนที่คุณตั้งไว้ในงวดนี้แล้ว!")
             
         st.markdown("---")
         st.write(f"**📋 รายละเอียดการจ่ายเงินย้อนหลังของ {view_period} เดือน {view_month_year}**")
         
-        # แสดงเฉพาะรายการที่มีค่าใช้จ่ายจริง (ซ่อนแถวเริ่มต้นเงินเดือนเพื่อความสะอาดตา)
-        df_display = df_filtered[df_filtered["Expense"] > 0]
+        # กรองแสดงเฉพาะรายการจ่ายจริงที่มี Expense > 0
+        df_display = df_filtered[df_filtered["Expense"] > 0].copy()
+        
         if not df_display.empty:
-            st.dataframe(df_display[["Date", "Item", "Expense"]].sort_values(by="Date", ascending=False), use_container_width=True)
+            # เรียงลำดับจากใหม่ไปเก่า
+            df_display = df_display.sort_values(by="Date", ascending=False)
+            
+            # 🆕 ระบบวนลูปสร้างปุ่มลบรายรายการแยกแต่ละแถวแบบสวยงาม
+            for idx, row in df_display.iterrows():
+                r_col1, r_col2, r_col3, r_col4 = st.columns([1.5, 3.5, 2, 1])
+                with r_col1:
+                    st.write(f"📅 {row['Date']}")
+                with r_col2:
+                    st.write(f"📌 {row['Item']}")
+                with r_col3:
+                    st.write(f"💰 {row['Expense']:,.2f} บาท")
+                with r_col4:
+                    # สร้างปุ่มลบสีแดงสำหรับแถวนั้นๆ โดยอ้างอิง Index จริงในฐานข้อมูล
+                    if st.button("🗑️ ลบ", key=f"del_{idx}", type="secondary", use_container_width=True):
+                        # ลบรายการนี้ออกจากฐานข้อมูลใหญ่ (df_all)
+                        df_all = df_all.drop(idx)
+                        save_data(df_all)
+                        st.toast(f"ลบรายการ '{row['Item']}' เรียบร้อยแล้ว")
+                        st.rerun()
         else:
             st.info("งวดนี้ยังไม่มีการบันทึกรายการค่าใช้จ่ายรายวันค่ะ")
         
@@ -218,7 +217,7 @@ with col2:
             mime="text/csv"
         )
         
-        if st.button(f"❌ ล้างข้อมูลเฉพาะ {view_period} ของเดือน {view_month_year}"):
+        if st.button(f"❌ ล้างข้อมูลทั้งหมดของ {view_period} เดือน {view_month_year}"):
             df_remain = df_all[~(
                 (df_all["User"] == current_user) & 
                 (df_all["MonthYear"] == view_month_year_str) & 
